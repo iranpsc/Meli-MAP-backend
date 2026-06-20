@@ -1,0 +1,181 @@
+const express = require("express");
+const axios = require("axios");
+const mysql = require("mysql");
+const cors = require("cors");
+const app = express();
+let db;
+
+app.use(cors());
+function handleDisconnect() {
+  db = mysql.createConnection({
+    host: "127.0.0.1",
+    user: "map_main",
+    password: "sR8WXFmV5E97Rj2rJyF9",
+    database: "map_main",
+  });
+
+  db.connect((err) => {
+    if (err) {
+      console.error("Error connecting to MySQL database:", err);
+      setTimeout(handleDisconnect, 2000); // Retry connection after 2 seconds
+    } else {
+      console.log("Connected to MySQL database");
+    }
+  });
+
+  db.on("error", (err) => {
+    console.error("Database error:", err);
+    if (err.code === "PROTOCOL_CONNECTION_LOST" || err.fatal) {
+      handleDisconnect();
+    }
+  });
+}
+
+handleDisconnect();
+
+const baseUrl =
+  "https://tiles-a.basemaps.cartocdn.com/vectortiles/carto.streets/v1/";
+
+async function downloadTilesForRequest(zoom, x, y) {
+  const url = `${baseUrl}${zoom}/${x}/${y}.mvt`;
+  try {
+    const response = await axios({
+      method: "GET",
+      url: url,
+      responseType: "arraybuffer",
+    });
+
+    const tileData = Buffer.from(response.data);
+    const parsedX = parseInt(x, 10);
+    const parsedY = parseInt(y, 10);
+    db.query(
+      "INSERT INTO tiles(zoom, x, y, data) VALUES(?, ?, ?, ?)",
+      [zoom, parsedX, parsedY, tileData],
+      (error) => {
+        if (error) {
+          console.error("Error inserting tile data:", error);
+        } else {
+          console.log(
+            `Downloaded and saved tile (${zoom}/${x}/${y}) to the database`
+          );
+        }
+      }
+    );
+  } catch (error) {
+    console.error(`Error downloading ${url}: ${error}`);
+  }
+}
+
+app.get("/tiles/:zoom/:x/:y", async (req, res) => {
+  const { zoom, x, y } = req.params;
+  const parsedX = parseInt(x, 10);
+  const parsedY = parseInt(y, 10);
+
+  db.query(
+    "SELECT data FROM tiles WHERE zoom = ? AND x = ? AND y = ?",
+    [zoom, parsedX, parsedY],
+    async (error, results) => {
+      if (error) {
+        console.error("Error querying the database:", error);
+        res.status(500).send("Internal Server Error");
+        return;
+      }
+
+      if (results.length > 0 && results[0].data) {
+        res.send(results[0].data);
+      } else {
+        await downloadTilesForRequest(zoom, x, y);
+        db.query(
+          "SELECT data FROM tiles WHERE zoom = ? AND x = ? AND y = ?",
+          [zoom, parsedX, parsedY],
+          (err, downloadedTile) => {
+            if (err) {
+              console.error(
+                "Error retrieving downloaded tile from the database:",
+                err
+              );
+              res.status(500).send("Internal Server Error");
+              return;
+            }
+
+            if (downloadedTile.length > 0 && downloadedTile[0].data) {
+              res.send(downloadedTile[0].data);
+            } else {
+              res.status(404).send("Tile not found");
+            }
+          }
+        );
+      }
+    }
+  );
+});
+async function downloadFontData(fontStack, fontRange) {
+  const fontUrl = `https://tiles.basemaps.cartocdn.com/fonts/${encodeURIComponent(
+    fontStack
+  )}/${fontRange}.pbf`;
+  try {
+    const response = await axios({
+      method: "GET",
+      url: fontUrl,
+      responseType: "arraybuffer",
+    });
+    const fontData = Buffer.from(response.data);
+    db.query(
+      "INSERT INTO fonts(name, font_range, data) VALUES(?, ?, ?)",
+      [fontStack, fontRange, fontData],
+      (error) => {
+        if (error) {
+          console.error("Error inserting font data:", error);
+        } else {
+          console.log(
+            `Downloaded and saved font (${fontStack}/${fontRange}) to the database`
+          );
+        }
+      }
+    );
+  } catch (error) {
+    console.error(`Error downloading ${fontUrl}: ${error}`);
+  }
+}
+app.get("/fonts/:fontStack/:fontRange", async (req, res) => {
+  const { fontStack, fontRange } = req.params;
+  db.query(
+    "SELECT data FROM fonts WHERE name = ? AND font_range = ?",
+    [fontStack, fontRange],
+    async (error, results) => {
+      if (error) {
+        console.error("Error querying the database for font:", error);
+        res.status(500).send("Internal Server Error");
+        return;
+      }
+      if (results.length > 0 && results[0].data) {
+        res.send(results[0].data);
+      } else {
+        await downloadFontData(fontStack, fontRange);
+        db.query(
+          "SELECT data FROM fonts WHERE name = ? AND font_range = ?",
+          [fontStack, fontRange],
+          (err, downloadedFont) => {
+            if (err) {
+              console.error(
+                "Error retrieving downloaded font from the database:",
+                err
+              );
+              res.status(500).send("Internal Server Error");
+              return;
+            }
+            if (downloadedFont.length > 0 && downloadedFont[0].data) {
+              res.send(downloadedFont[0].data);
+            } else {
+              res.status(404).send("Font not found");
+            }
+          }
+        );
+      }
+    }
+  );
+});
+const port = 3001;
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
+});
