@@ -10,7 +10,6 @@ import "./style.css";
 
 setWorkerUrl(mapLibreWorkerUrl);
 
-const statusElement = document.querySelector("#map-status");
 const modelLocations = [
   {
     id: "shahid",
@@ -41,29 +40,8 @@ const map = new MapLibreMap({
 
 map.addControl(new NavigationControl(), "top-right");
 
-function showStatus(message) {
-  if (!statusElement) {
-    console.error("Map status element is missing:", message);
-    return;
-  }
-
-  statusElement.textContent = message;
-  statusElement.hidden = false;
-}
-
-function hideStatus() {
-  if (statusElement) {
-    statusElement.hidden = true;
-  }
-}
-
 map.on("error", (event) => {
   console.error("Map resource failed to load:", event.error);
-  showStatus("Some map resources could not be loaded.");
-});
-
-map.once("idle", () => {
-  showStatus("Click a model marker to zoom in and load its FBX.");
 });
 
 map.on("style.load", () => {
@@ -101,7 +79,6 @@ function addModelLocations() {
       return;
     }
 
-    showStatus("Zooming to the model location…");
     map.flyTo({
       center: coordinates,
       zoom: 17,
@@ -183,7 +160,7 @@ function createFbxLayer() {
   };
 
   async function loadModels() {
-    if (modelsLoading || map.getZoom() < 1) {
+    if (modelsLoading || map.getZoom() < 16) {
       return;
     }
 
@@ -217,7 +194,6 @@ function createFbxLayer() {
           (model) => {
             try {
               addModel(model, location);
-              hideStatus();
               map.triggerRepaint();
             } catch (error) {
               reportModelError(location.url, error);
@@ -229,9 +205,6 @@ function createFbxLayer() {
       }
     } catch (error) {
       console.error("Unable to initialize the FBX map layer:", error);
-      showStatus(
-        `Unable to initialize 3D map models: ${error.message || error}`,
-      );
       modelsLoading = false;
     }
   }
@@ -274,6 +247,5 @@ function createFbxLayer() {
 
   function reportModelError(url, error) {
     console.error(`Unable to load map model ${url}:`, error);
-    showStatus(`Unable to load ${url}: ${error.message || error}`);
   }
 }
