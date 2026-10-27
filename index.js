@@ -11,7 +11,7 @@ const allowedOrigins = (process.env.CORS_ORIGIN || "")
 let db;
 let reconnectTimer;
 
-app.use(cors({ origin: allowedOrigins.length > 0 ? allowedOrigins : true }));
+app.use(cors({ origin: allowedOrigins.length > 0 ? allowedOrigins : false }));
 
 function scheduleReconnect() {
   if (reconnectTimer) {
