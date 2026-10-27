@@ -13,6 +13,7 @@ const mapDataDirectory = path.resolve(
   process.env.MAP_DATA_DIR || path.join(__dirname, "frontend", "public")
 );
 
+// Limiter for map config files (tile.json, styleMap.json)
 const mapConfigLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   limit: 60, // Maximum 60 requests per minute per IP
@@ -22,6 +23,16 @@ const mapConfigLimiter = rateLimit({
     error: "Too many requests. Please try again later.",
   },
 });
+
+// Limiter for the frontend fallback route (serves index.html from disk)
+const frontendLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 300, // Maximum 300 requests per 15 minutes per IP
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: "Too many requests. Please try again later.",
+});
+
 let db;
 let reconnectTimer;
 
@@ -103,7 +114,7 @@ function absoluteFrontendUrl(req, resourceUrl) {
   return `${req.protocol}://${req.get("host")}${resourceUrl}`;
 }
 
-app.get("/tile.json", async (req, res) => {
+app.get("/tile.json", mapConfigLimiter, async (req, res) => {
   try {
     const tileConfig = JSON.parse(
       await fs.readFile(path.join(mapDataDirectory, "tile.json"), "utf8")
@@ -142,6 +153,7 @@ app.get("/styleMap.json", mapConfigLimiter, async (req, res) => {
     res.status(500).send("Unable to serve map style");
   }
 });
+
 app.get("/tiles/:zoom/:x/:y", async (req, res) => {
   const { zoom, x } = req.params;
   const y = req.params.y.replace(/\.mvt$/, "");
@@ -181,7 +193,6 @@ app.get("/tiles/:zoom/:x/:y", async (req, res) => {
     res.status(500).send("Unable to retrieve map tile");
   }
 });
-
 
 async function downloadFontData(fontStack, fontRange) {
   const allowedFontStackPattern = /^[a-zA-Z0-9 _-]+$/;
@@ -260,7 +271,7 @@ async function startServer() {
   if (process.env.NODE_ENV === "production") {
     app.use(express.static(frontendDirectory));
 
-    app.get("*", (req, res) => {
+    app.get("*", frontendLimiter, (req, res) => {
       if (!req.accepts("html")) {
         res.sendStatus(404);
         return;
