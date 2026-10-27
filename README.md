@@ -1,10 +1,12 @@
 # Meli MAP (National Map)
 
-Meli MAP is a mapping project consisting of a map website and a backend API built with Node.js. The Express server serves the frontend files and handles map requests in a single application. There is no need to run a separate frontend development server or Apache through XAMPP for local development.
+Meli MAP is a map-only application. Its editable frontend source uses MapLibre GL JS to render the project's vector tiles and Three.js to place the FBX models on the map. The Express backend serves the map APIs and, in development, the Vite-powered frontend from a single process.
 
 ## Features
 
-- Serves the prebuilt frontend from the `public/` directory.
+- Provides a small, editable map frontend in `frontend/src/`.
+- Renders the vector style defined in `frontend/public/styleMap.json` and `frontend/public/tile.json`.
+- Loads the Shahid and office FBX models at their configured map coordinates.
 - Fetches and caches vector map tiles (`.mvt`) and map fonts.
 - Uses MySQL to store cached tiles and fonts.
 - Runs the website and API together on port `3001`.
@@ -12,7 +14,7 @@ Meli MAP is a mapping project consisting of a map website and a backend API buil
 ## Prerequisites
 
 - Git
-- Node.js 18 or later and npm
+- Node.js 22 or later and npm
 - MySQL (XAMPP can be used for local development)
 - An internet connection to fetch tiles and fonts that are not yet cached
 
@@ -47,21 +49,21 @@ Node.js does not automatically load `.env` files. The project's `.env` file is i
 
 ### Start the Website and API
 
-Run the following command from the project root:
+Run the backend and editable frontend together from the project root:
 
 ```bash
 npm run dev
 ```
 
-The following command is also available for regular execution and Docker environments:
+Open the website at [http://localhost:3001](http://localhost:3001). The app uses the MySQL database settings described above for tile and font caching.
 
-```bash
-npm start
+Create a production frontend bundle with:
+
+```powershell
+npm run build
 ```
 
-Open the website in your browser:
-
-[http://localhost:3001](http://localhost:3001)
+Then run the production server with `npm start`.
 
 To check whether the server is running, open:
 
@@ -79,44 +81,26 @@ The website may load even when the database is unavailable. However, the tile an
 
 ## Working with the Map
 
-The current frontend is provided as prebuilt files. The original React/Vite source code is not included in this repository.
-
-The following files contain the main editable map configuration and backend implementation:
+The frontend is source code, not the previous prebuilt application bundle. The main files for map development are:
 
 | File | Description |
 | --- | --- |
-| [`public/styleMap.json`](./public/styleMap.json) | Map styling, layers, colors, labels, and map source configuration |
-| [`public/tile.json`](./public/tile.json) | TileJSON configuration and vector layer definitions |
-| [`index.js`](./index.js) | API endpoints, MySQL connection, and tile/font fetching and caching |
+| [`frontend/src/main.js`](./frontend/src/main.js) | MapLibre map setup and FBX model placement |
+| [`frontend/src/style.css`](./frontend/src/style.css) | Map container and loading-status styles |
+| [`frontend/public/styleMap.json`](./frontend/public/styleMap.json) | Map styling, layers, colors, labels, and map source configuration |
+| [`frontend/public/tile.json`](./frontend/public/tile.json) | TileJSON configuration and vector layer definitions |
+| [`frontend/public/shahid.fbx`](./frontend/public/shahid.fbx), [`frontend/public/office.fbx`](./frontend/public/office.fbx) | FBX models displayed on the map at zoom level 16 and above |
+| [`index.js`](./index.js) | API endpoints, MySQL connection, tile/font fetching and caching, and Vite development server |
 | [`schema.sql`](./schema.sql) | Database and cache table definitions |
-| `public/assets/` | Prebuilt frontend assets, images, and UI resources |
+| [`vite.config.mjs`](./vite.config.mjs) | Frontend development and production build settings |
 
-### Changing the Map Appearance
+### Changing the map
 
-To change the map's appearance, start by editing `public/styleMap.json`.
+Edit `frontend/src/main.js` to change map initialization, controls, or model locations. Click a model marker on the map to zoom to the FBX location; models render at zoom level 16 and above. Update `frontend/public/styleMap.json` for map styling and `frontend/public/tile.json` for vector tile metadata and layer definitions. The style references `/tile.json`, which provides the backend tile endpoint `/tiles/{z}/{x}/{y}.mvt`.
 
-The map source currently points to `/tile.json`. The TileJSON file connects vector tile requests to `/tiles/{z}/{x}/{y}.mvt`.
+Run `npm run dev` to apply source changes, or `npm run build` to generate the production frontend. Use the browser's Network panel to inspect requests to `/styleMap.json`, `/tile.json`, `/tiles/...mvt`, and `/fonts/...`.
 
-When serving configuration files, the server converts these paths into absolute URLs pointing to the same server. Do not change them to relative paths or hardcode a specific domain unless you also update the map-serving configuration.
-
-After saving your changes, refresh the page and open **Developer Tools → Network** to verify that the following requests return successful responses:
-
-- `/styleMap.json`
-- `/tile.json`
-- `/tiles/...mvt`
-- `/fonts/...`
-
-You can also test a sample tile directly:
-
-[http://localhost:3001/tiles/11/1309/802.mvt](http://localhost:3001/tiles/11/1309/802.mvt)
-
-### Frontend Assets
-
-The `public/assets/` directory contains the compiled frontend output. Editing JavaScript or CSS files in this directory directly is not recommended because the changes may be overwritten by a future build.
-
-Major frontend changes require the original frontend source code and its build process.
-
-Keep the files in this directory intact because the current website depends on them.
+FBX files in `frontend/public/` are served from the site root. Update the model locations in `frontend/src/main.js` when adding, removing, or moving map models.
 
 ### Tile and Font Caching
 
@@ -201,15 +185,16 @@ docker compose down
    ```
 
 3. Modify the relevant files:
-   - Use `public/styleMap.json` to update the map style.
-   - Use `public/tile.json` to configure vector tile sources and layers.
+   - Use `frontend/src/main.js` to update map behavior and FBX model locations.
+   - Use `frontend/public/styleMap.json` to update the map style.
+   - Use `frontend/public/tile.json` to configure vector tile sources and layers.
 4. Start the server and verify the map changes and API responses in your browser.
 5. Before committing, ensure that no `.env` files, database passwords, or private data are included.
 6. Commit your changes and open a Pull Request.
 
 If you modify the database schema, document the changes in `schema.sql` as well.
 
-If you change the paths or names of frontend files, verify all related references in `public/index.html`, the map configuration, and the server implementation.
+If you change frontend paths or names, verify the Vite entry point, map configuration, and server implementation.
 
 ## Project Structure
 
@@ -219,13 +204,12 @@ If you change the paths or names of frontend files, verify all related reference
 ├── package.json             # npm scripts and dependencies
 ├── schema.sql               # Database cache schema
 ├── docker-compose.yml       # Application and MySQL services
-├── public/
-│   ├── index.html           # Main website entry point
-│   ├── styleMap.json        # Map style configuration
-│   ├── tile.json            # Vector tile metadata and layer definitions
-│   ├── assets/              # Prebuilt frontend assets
-│   ├── Build/               # Unity build files
-│   └── fonts/               # UI fonts
+├── frontend/
+│   ├── index.html           # Map app entry point
+│   ├── src/                 # Editable map and model source
+│   ├── public/              # Tile/style JSON and FBX map models
+│   └── dist/                # Generated by npm run build
+├── vite.config.mjs          # Frontend build and development config
 └── README.md
 ```
 

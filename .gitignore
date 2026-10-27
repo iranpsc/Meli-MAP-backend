@@ -14,6 +14,7 @@ backup.zip
 package-lock copy.json
 dist
 dist-ssr
+/frontend/dist/
 *.local
 .env
 

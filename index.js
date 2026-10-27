@@ -4,11 +4,24 @@ const express = require("express");
 const axios = require("axios");
 const mysql = require("mysql2");
 const cors = require("cors");
-
+const { rateLimit } = require("express-rate-limit");
 const app = express();
 const frontendDirectory = path.resolve(
-  process.env.FRONTEND_DIR || path.join(__dirname, "public")
+  process.env.FRONTEND_DIR || path.join(__dirname, "frontend", "dist")
 );
+const mapDataDirectory = path.resolve(
+  process.env.MAP_DATA_DIR || path.join(__dirname, "frontend", "public")
+);
+
+const mapConfigLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  limit: 60, // Maximum 60 requests per minute per IP
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    error: "Too many requests. Please try again later.",
+  },
+});
 let db;
 let reconnectTimer;
 
@@ -93,11 +106,12 @@ function absoluteFrontendUrl(req, resourceUrl) {
 app.get("/tile.json", async (req, res) => {
   try {
     const tileConfig = JSON.parse(
-      await fs.readFile(path.join(frontendDirectory, "tile.json"), "utf8")
+      await fs.readFile(path.join(mapDataDirectory, "tile.json"), "utf8")
     );
     tileConfig.tiles = tileConfig.tiles.map((url) =>
       absoluteFrontendUrl(req, url)
     );
+    res.set("Cache-Control", "no-store");
     res.json(tileConfig);
   } catch (error) {
     console.error("Error serving tile configuration:", error);
@@ -105,23 +119,29 @@ app.get("/tile.json", async (req, res) => {
   }
 });
 
-app.get("/styleMap.json", async (req, res) => {
+app.get("/styleMap.json", mapConfigLimiter, async (req, res) => {
   try {
     const style = JSON.parse(
-      await fs.readFile(path.join(frontendDirectory, "styleMap.json"), "utf8")
+      await fs.readFile(
+        path.join(mapDataDirectory, "styleMap.json"),
+        "utf8"
+      )
     );
+
     style.sources.carto.url = absoluteFrontendUrl(
       req,
       style.sources.carto.url
     );
+
     style.glyphs = absoluteFrontendUrl(req, style.glyphs);
+
+    res.set("Cache-Control", "no-store");
     res.json(style);
   } catch (error) {
     console.error("Error serving map style:", error);
     res.status(500).send("Unable to serve map style");
   }
 });
-
 app.get("/tiles/:zoom/:x/:y", async (req, res) => {
   const { zoom, x } = req.params;
   const y = req.params.y.replace(/\.mvt$/, "");
@@ -162,15 +182,51 @@ app.get("/tiles/:zoom/:x/:y", async (req, res) => {
   }
 });
 
+
 async function downloadFontData(fontStack, fontRange) {
-  const fontUrl = `https://tiles.basemaps.cartocdn.com/fonts/${encodeURIComponent(
-    fontStack
-  )}/${fontRange}.pbf`;
+  const allowedFontStackPattern = /^[a-zA-Z0-9 _-]+$/;
+  const fontRangePattern = /^\d+-\d+$/;
+
+  if (
+    typeof fontStack !== "string" ||
+    !allowedFontStackPattern.test(fontStack)
+  ) {
+    throw new Error("Invalid font stack");
+  }
+
+  if (
+    typeof fontRange !== "string" ||
+    !fontRangePattern.test(fontRange)
+  ) {
+    throw new Error("Invalid font range");
+  }
+
+  const [start, end] = fontRange.split("-").map(Number);
+
+  if (
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end < start ||
+    end > 0xffff
+  ) {
+    throw new Error("Font range is out of bounds");
+  }
+
+  const fontUrl = new URL(
+    `https://tiles.basemaps.cartocdn.com/fonts/${encodeURIComponent(
+      fontStack
+    )}/${fontRange}.pbf`
+  );
+
   const response = await axios({
     method: "GET",
-    url: fontUrl,
+    url: fontUrl.href,
     responseType: "arraybuffer",
+    timeout: 10000,
+    maxRedirects: 0,
   });
+
   return Buffer.from(response.data);
 }
 
@@ -200,25 +256,42 @@ app.get("/fonts/:fontStack/:fontRange", async (req, res) => {
   }
 });
 
-app.use(express.static(frontendDirectory));
+async function startServer() {
+  if (process.env.NODE_ENV === "production") {
+    app.use(express.static(frontendDirectory));
 
-app.get("*", (req, res) => {
-  if (!req.accepts("html")) {
-    res.sendStatus(404);
-    return;
+    app.get("*", (req, res) => {
+      if (!req.accepts("html")) {
+        res.sendStatus(404);
+        return;
+      }
+
+      res.sendFile(path.join(frontendDirectory, "index.html"), (error) => {
+        if (error) {
+          console.error("Error serving frontend:", error);
+          if (!res.headersSent) {
+            res.status(error.statusCode || 500).send("Unable to serve frontend");
+          }
+        }
+      });
+    });
+  } else {
+    const { createServer } = await import("vite");
+    const vite = await createServer({
+      configFile: path.join(__dirname, "vite.config.mjs"),
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
   }
 
-  res.sendFile(path.join(frontendDirectory, "index.html"), (error) => {
-    if (error) {
-      console.error("Error serving frontend:", error);
-      if (!res.headersSent) {
-        res.status(error.statusCode || 500).send("Unable to serve frontend");
-      }
-    }
+  const port = Number(process.env.PORT) || 3001;
+  app.listen(port, "0.0.0.0", () => {
+    console.log(`Server is running on port ${port}`);
   });
-});
+}
 
-const port = Number(process.env.PORT) || 3001;
-app.listen(port, "0.0.0.0", () => {
-  console.log(`Server is running on port ${port}`);
+startServer().catch((error) => {
+  console.error("Error starting the application:", error);
+  process.exitCode = 1;
 });

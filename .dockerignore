@@ -4,6 +4,7 @@ node_modules copy
 .git copy
 backup.zip
 package-lock copy.json
+frontend/dist
 .env
 .env.*
 !.env.example
