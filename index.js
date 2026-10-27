@@ -1,42 +1,17 @@
-const path = require("path");
-const fs = require("fs").promises;
 const express = require("express");
 const axios = require("axios");
 const mysql = require("mysql2");
 const cors = require("cors");
-const { rateLimit } = require("express-rate-limit");
 const app = express();
-const frontendDirectory = path.resolve(
-  process.env.FRONTEND_DIR || path.join(__dirname, "frontend", "dist")
-);
-const mapDataDirectory = path.resolve(
-  process.env.MAP_DATA_DIR || path.join(__dirname, "frontend", "public")
-);
-
-// Limiter for map config files (tile.json, styleMap.json)
-const mapConfigLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  limit: 60, // Maximum 60 requests per minute per IP
-  standardHeaders: "draft-8",
-  legacyHeaders: false,
-  message: {
-    error: "Too many requests. Please try again later.",
-  },
-});
-
-// Limiter for the frontend fallback route (serves index.html from disk)
-const frontendLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  limit: 300, // Maximum 300 requests per 15 minutes per IP
-  standardHeaders: "draft-8",
-  legacyHeaders: false,
-  message: "Too many requests. Please try again later.",
-});
+const allowedOrigins = (process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 let db;
 let reconnectTimer;
 
-app.use(cors());
+app.use(cors({ origin: allowedOrigins.length > 0 ? allowedOrigins : true }));
 
 function scheduleReconnect() {
   if (reconnectTimer) {
@@ -104,54 +79,6 @@ async function downloadTile(zoom, x, y) {
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
-});
-
-function absoluteFrontendUrl(req, resourceUrl) {
-  if (!resourceUrl.startsWith("/")) {
-    return resourceUrl;
-  }
-
-  return `${req.protocol}://${req.get("host")}${resourceUrl}`;
-}
-
-app.get("/tile.json", mapConfigLimiter, async (req, res) => {
-  try {
-    const tileConfig = JSON.parse(
-      await fs.readFile(path.join(mapDataDirectory, "tile.json"), "utf8")
-    );
-    tileConfig.tiles = tileConfig.tiles.map((url) =>
-      absoluteFrontendUrl(req, url)
-    );
-    res.set("Cache-Control", "no-store");
-    res.json(tileConfig);
-  } catch (error) {
-    console.error("Error serving tile configuration:", error);
-    res.status(500).send("Unable to serve tile configuration");
-  }
-});
-
-app.get("/styleMap.json", mapConfigLimiter, async (req, res) => {
-  try {
-    const style = JSON.parse(
-      await fs.readFile(
-        path.join(mapDataDirectory, "styleMap.json"),
-        "utf8"
-      )
-    );
-
-    style.sources.carto.url = absoluteFrontendUrl(
-      req,
-      style.sources.carto.url
-    );
-
-    style.glyphs = absoluteFrontendUrl(req, style.glyphs);
-
-    res.set("Cache-Control", "no-store");
-    res.json(style);
-  } catch (error) {
-    console.error("Error serving map style:", error);
-    res.status(500).send("Unable to serve map style");
-  }
 });
 
 app.get("/tiles/:zoom/:x/:y", async (req, res) => {
@@ -267,42 +194,7 @@ app.get("/fonts/:fontStack/:fontRange", async (req, res) => {
   }
 });
 
-async function startServer() {
-  if (process.env.NODE_ENV === "production") {
-    app.use(express.static(frontendDirectory));
-
-    app.get("*", frontendLimiter, (req, res) => {
-      if (!req.accepts("html")) {
-        res.sendStatus(404);
-        return;
-      }
-
-      res.sendFile(path.join(frontendDirectory, "index.html"), (error) => {
-        if (error) {
-          console.error("Error serving frontend:", error);
-          if (!res.headersSent) {
-            res.status(error.statusCode || 500).send("Unable to serve frontend");
-          }
-        }
-      });
-    });
-  } else {
-    const { createServer } = await import("vite");
-    const vite = await createServer({
-      configFile: path.join(__dirname, "vite.config.mjs"),
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  }
-
-  const port = Number(process.env.PORT) || 3001;
-  app.listen(port, "0.0.0.0", () => {
-    console.log(`Server is running on port ${port}`);
-  });
-}
-
-startServer().catch((error) => {
-  console.error("Error starting the application:", error);
-  process.exitCode = 1;
+const port = Number(process.env.PORT) || 3001;
+app.listen(port, "0.0.0.0", () => {
+  console.log(`Map API is running on port ${port}`);
 });

@@ -1,15 +1,12 @@
 # Meli MAP (National Map)
 
-Meli MAP is a map-only application. Its editable frontend source uses MapLibre GL JS to render the project's vector tiles and Three.js to place the FBX models on the map. The Express backend serves the map APIs and, in development, the Vite-powered frontend from a single process.
+Meli MAP consists of two independent projects: a Node.js/Express backend API with a MySQL tile cache, and a MapLibre/Three.js frontend. Each project has its own dependencies, Dockerfile, and deployment lifecycle. The frontend connects to the backend using `VITE_API_BASE_URL`.
 
 ## Features
 
-- Provides a small, editable map frontend in `frontend/src/`.
-- Renders the vector style defined in `frontend/public/styleMap.json` and `frontend/public/tile.json`.
-- Loads the Shahid and office FBX models at their configured map coordinates.
-- Fetches and caches vector map tiles (`.mvt`) and map fonts.
-- Uses MySQL to store cached tiles and fonts.
-- Runs the website and API together on port `3001`.
+- Provides API endpoints for vector tiles and map fonts.
+- Fetches and caches vector tiles (`.mvt`) and fonts in MySQL.
+- The frontend repository contains the editable map source, style, TileJSON, and FBX models.
 
 ## Prerequisites
 
@@ -18,7 +15,7 @@ Meli MAP is a map-only application. Its editable frontend source uses MapLibre G
 - MySQL (XAMPP can be used for local development)
 - An internet connection to fetch tiles and fonts that are not yet cached
 
-## Clone and Run the Project Locally
+## Run the Backend Locally
 
 Clone the repository and navigate to the project directory:
 
@@ -47,60 +44,42 @@ $env:DB_NAME = "map_main"
 
 Node.js does not automatically load `.env` files. The project's `.env` file is intended for Docker Compose. When running Node.js directly, configure the environment variables as shown above.
 
-### Start the Website and API
+### Start the API
 
-Run the backend and editable frontend together from the project root:
+Start the backend API:
 
 ```bash
 npm run dev
 ```
 
-Open the website at [http://localhost:3001](http://localhost:3001). The app uses the MySQL database settings described above for tile and font caching.
+The API listens on port `3001`. To check it, open [http://localhost:3001/health](http://localhost:3001/health).
 
-Create a production frontend bundle with:
+## Run the Frontend Locally
+
+Clone the separate frontend repository beside the backend (once its remote is published):
 
 ```powershell
-npm run build
+git clone <frontend-repository-url> ..\Meli-MAP-frontend
+Set-Location ..\Meli-MAP-frontend
+npm install
+Copy-Item .env.example .env
+npm run dev
 ```
 
-Then run the production server with `npm start`.
+The Vite development server prints the frontend URL (normally `http://localhost:5173`). Set `VITE_API_BASE_URL` in the frontend `.env` to the backend's reachable URL; the default is `http://localhost:3001`. The backend accepts cross-origin requests by default. To restrict CORS, set `CORS_ORIGIN` to the frontend origin before starting the backend.
 
-To check whether the server is running, open:
-
-[http://localhost:3001/health](http://localhost:3001/health)
-
-A healthy server returns:
-
-```json
-{
-  "status": "ok"
-}
-```
-
-The website may load even when the database is unavailable. However, the tile and font APIs require MySQL to read from or write to the cache. MySQL connection status is displayed in the Node.js terminal.
-
-## Working with the Map
-
-The frontend is source code, not the previous prebuilt application bundle. The main files for map development are:
+## Frontend Map Files
 
 | File | Description |
 | --- | --- |
-| [`frontend/src/main.js`](./frontend/src/main.js) | MapLibre map setup and FBX model placement |
-| [`frontend/src/style.css`](./frontend/src/style.css) | Map container and loading-status styles |
-| [`frontend/public/styleMap.json`](./frontend/public/styleMap.json) | Map styling, layers, colors, labels, and map source configuration |
-| [`frontend/public/tile.json`](./frontend/public/tile.json) | TileJSON configuration and vector layer definitions |
-| [`frontend/public/shahid.fbx`](./frontend/public/shahid.fbx), [`frontend/public/office.fbx`](./frontend/public/office.fbx) | FBX models displayed on the map at zoom level 16 and above |
-| [`index.js`](./index.js) | API endpoints, MySQL connection, tile/font fetching and caching, and Vite development server |
+| Separate `Meli-MAP-frontend` repository | MapLibre source, style/TileJSON, FBX assets, and its own Dockerfile |
+| `src/main.js` in the frontend repository | Map initialization, API URL, and FBX model placement |
+| `public/styleMap.json` and `public/tile.json` in the frontend repository | Map style, vector source, and tile template |
+| `public/*.fbx` in the frontend repository | Map models displayed at zoom level 16 and above |
+| [`index.js`](./index.js) | Backend API endpoints and MySQL cache |
 | [`schema.sql`](./schema.sql) | Database and cache table definitions |
-| [`vite.config.mjs`](./vite.config.mjs) | Frontend development and production build settings |
 
-### Changing the map
-
-Edit `frontend/src/main.js` to change map initialization, controls, or model locations. Click a model marker on the map to zoom to the FBX location; models render at zoom level 16 and above. Update `frontend/public/styleMap.json` for map styling and `frontend/public/tile.json` for vector tile metadata and layer definitions. The style references `/tile.json`, which provides the backend tile endpoint `/tiles/{z}/{x}/{y}.mvt`.
-
-Run `npm run dev` to apply source changes, or `npm run build` to generate the production frontend. Use the browser's Network panel to inspect requests to `/styleMap.json`, `/tile.json`, `/tiles/...mvt`, and `/fonts/...`.
-
-FBX files in `frontend/public/` are served from the site root. Update the model locations in `frontend/src/main.js` when adding, removing, or moving map models.
+The frontend owns the style and TileJSON files. At startup it rewrites tile and font URLs to the configured backend API. Click a model marker to zoom to its FBX location; models render at zoom level 16 and above.
 
 ### Tile and Font Caching
 
@@ -115,8 +94,6 @@ The same caching mechanism is used for map fonts.
 | Method | Endpoint | Description |
 | --- | --- | --- |
 | `GET` | `/health` | Checks server health |
-| `GET` | `/styleMap.json` | Returns the map style configuration |
-| `GET` | `/tile.json` | Returns TileJSON metadata and vector layer definitions |
 | `GET` | `/tiles/:zoom/:x/:y.mvt` | Returns a vector map tile |
 | `GET` | `/fonts/:fontStack/:fontRange` | Returns map font data |
 
@@ -130,9 +107,9 @@ Map font:
 
 [http://localhost:3001/fonts/Noto%20Sans%20Regular/0-255](http://localhost:3001/fonts/Noto%20Sans%20Regular/0-255)
 
-## Running the Project with Docker
+## Run the Backend with Docker
 
-If Docker Desktop and Docker Compose are installed, you do not need to run XAMPP for the database. Docker Compose starts its own MySQL service.
+The backend repository's Compose file starts only the API and its MySQL cache. The frontend is built and run independently from its own repository and Dockerfile.
 
 In PowerShell, create `.env` from the example if you do not already have one:
 
@@ -149,6 +126,7 @@ For example, the file should contain:
 ```dotenv
 MYSQL_ROOT_PASSWORD=your-strong-root-password
 DB_PASSWORD=your-strong-map-password
+CORS_ORIGIN=http://localhost:8080
 ```
 
 Docker Desktop must be running before you start the services.
@@ -159,9 +137,9 @@ Build and start the application:
 docker compose up --build -d
 ```
 
-The website will be available at:
+The backend API will be available at:
 
-[http://localhost:3001](http://localhost:3001)
+[http://localhost:3001/health](http://localhost:3001/health)
 
 To follow the application logs:
 
@@ -175,42 +153,43 @@ To stop the services:
 docker compose down
 ```
 
+## Run the Frontend with Docker
+
+From the frontend repository, build the static map image with the public backend URL:
+
+```powershell
+docker build --build-arg VITE_API_BASE_URL=http://localhost:3001 -t meli-map-frontend .
+docker run --rm -p 8080:80 meli-map-frontend
+```
+
+The map UI will be available at [http://localhost:8080](http://localhost:8080). Set `VITE_API_BASE_URL` to the externally reachable backend URL when building for deployment, and set the backend's `CORS_ORIGIN` to the frontend's origin.
+
 ## Contributing
 
-1. Clone the repository and follow the local setup instructions.
-2. Create a separate branch for your changes:
+The frontend and backend are versioned and deployed separately. Make frontend changes in the `Meli-MAP-frontend` repository and API/database changes in this repository. Configure the deployed frontend's `VITE_API_BASE_URL` and backend's `CORS_ORIGIN` to point to one another.
+
+1. Create a separate branch for your changes:
 
    ```bash
    git switch -c feature/map-style-update
    ```
 
-3. Modify the relevant files:
-   - Use `frontend/src/main.js` to update map behavior and FBX model locations.
-   - Use `frontend/public/styleMap.json` to update the map style.
-   - Use `frontend/public/tile.json` to configure vector tile sources and layers.
-4. Start the server and verify the map changes and API responses in your browser.
-5. Before committing, ensure that no `.env` files, database passwords, or private data are included.
-6. Commit your changes and open a Pull Request.
+2. Modify the files in the relevant repository.
+3. Start the API and frontend independently and verify the map and API requests.
+4. Before committing, ensure that no `.env` files, database passwords, or private data are included.
+5. Commit your changes and open a Pull Request.
 
 If you modify the database schema, document the changes in `schema.sql` as well.
-
-If you change frontend paths or names, verify the Vite entry point, map configuration, and server implementation.
 
 ## Project Structure
 
 ```text
 .
-├── index.js                 # Express server and map API
-├── package.json             # npm scripts and dependencies
-├── schema.sql               # Database cache schema
-├── docker-compose.yml       # Application and MySQL services
-├── frontend/
-│   ├── index.html           # Map app entry point
-│   ├── src/                 # Editable map and model source
-│   ├── public/              # Tile/style JSON and FBX map models
-│   └── dist/                # Generated by npm run build
-├── vite.config.mjs          # Frontend build and development config
-└── README.md
+├── index.js            # Express map API
+├── package.json        # Backend dependencies and scripts
+├── schema.sql          # MySQL cache schema
+├── Dockerfile          # Backend API image
+└── docker-compose.yml  # Backend API and MySQL
 ```
 
 ## License

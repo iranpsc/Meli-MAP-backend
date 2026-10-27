@@ -10,6 +10,7 @@ services:
       DB_USER: map_user
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env file}
       DB_NAME: map_main
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
     ports:
       - "3001:3001"
     depends_on:
