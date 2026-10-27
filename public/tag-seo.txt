@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+    <meta name="google-site-verification" content="lmf8kBJQgLHew_wXcxGQwJQWiOSFy8odEBRTLOoX7Q4" />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نقشه ملی</title>
+    
+    <!-- تگ کلمه کلیدی (Meta Keywords) -->
+    <meta name="keywords" content="نقشه ملی">
+    
+    <!-- تگ توضیحات (Meta Description) -->
+    <meta name="description" content="نقشه سه بعدی با ویژگی های منحصر به فرد، ساختار سازی شده برای خلق تکنولوژی مدیریت هوشمند کرده خاکی">
+    
+    <!-- تگ زبان (Language) -->
+    <meta name="language" content="فارسی, انگلیسی, عربی">
+    
+    <!-- تگ توسعه دهنده (Author) -->
+    <meta name="author" content="شرکت تعاونی زنجیره تامین بهشت">
+    
+    <!-- تگ مرورگرها (Browser Compatibility) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- دیگر تگ‌های سئو مورد نیاز -->
+    
+</head>
+<body>
+    <!-- محتوای سایت شما -->
+</body>
+</html>

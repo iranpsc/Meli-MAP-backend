@@ -1,0 +1,9 @@
+node_modules
+node_modules copy
+.git
+.git copy
+backup.zip
+package-lock copy.json
+.env
+.env.*
+!.env.example

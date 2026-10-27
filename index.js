@@ -1,33 +1,65 @@
+const path = require("path");
+const fs = require("fs").promises;
 const express = require("express");
 const axios = require("axios");
-const mysql = require("mysql");
+const mysql = require("mysql2");
 const cors = require("cors");
+
 const app = express();
+const frontendDirectory = path.resolve(
+  process.env.FRONTEND_DIR || path.join(__dirname, "public")
+);
 let db;
+let reconnectTimer;
 
 app.use(cors());
+
+function scheduleReconnect() {
+  if (reconnectTimer) {
+    return;
+  }
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = undefined;
+    handleDisconnect();
+  }, 2000);
+}
+
 function handleDisconnect() {
   db = mysql.createConnection({
-    host: "127.0.0.1",
-    user: "map_main",
-    password: "sR8WXFmV5E97Rj2rJyF9",
-    database: "map_main",
+    host: process.env.DB_HOST || "127.0.0.1",
+    port: Number(process.env.DB_PORT) || 3306,
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "map_main",
   });
 
-  db.connect((err) => {
-    if (err) {
-      console.error("Error connecting to MySQL database:", err);
-      setTimeout(handleDisconnect, 2000); // Retry connection after 2 seconds
+  db.connect((error) => {
+    if (error) {
+      console.error("Error connecting to MySQL database:", error);
+      scheduleReconnect();
     } else {
       console.log("Connected to MySQL database");
     }
   });
 
-  db.on("error", (err) => {
-    console.error("Database error:", err);
-    if (err.code === "PROTOCOL_CONNECTION_LOST" || err.fatal) {
-      handleDisconnect();
+  db.on("error", (error) => {
+    console.error("Database error:", error);
+    if (error.code === "PROTOCOL_CONNECTION_LOST" || error.fatal) {
+      scheduleReconnect();
     }
+  });
+}
+
+function query(sql, values) {
+  return new Promise((resolve, reject) => {
+    db.query(sql, values, (error, results) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(results);
+      }
+    });
   });
 }
 
@@ -36,146 +68,157 @@ handleDisconnect();
 const baseUrl =
   "https://tiles-a.basemaps.cartocdn.com/vectortiles/carto.streets/v1/";
 
-async function downloadTilesForRequest(zoom, x, y) {
+async function downloadTile(zoom, x, y) {
   const url = `${baseUrl}${zoom}/${x}/${y}.mvt`;
-  try {
-    const response = await axios({
-      method: "GET",
-      url: url,
-      responseType: "arraybuffer",
-    });
-
-    const tileData = Buffer.from(response.data);
-    const parsedX = parseInt(x, 10);
-    const parsedY = parseInt(y, 10);
-    db.query(
-      "INSERT INTO tiles(zoom, x, y, data) VALUES(?, ?, ?, ?)",
-      [zoom, parsedX, parsedY, tileData],
-      (error) => {
-        if (error) {
-          console.error("Error inserting tile data:", error);
-        } else {
-          console.log(
-            `Downloaded and saved tile (${zoom}/${x}/${y}) to the database`
-          );
-        }
-      }
-    );
-  } catch (error) {
-    console.error(`Error downloading ${url}: ${error}`);
-  }
+  const response = await axios({
+    method: "GET",
+    url,
+    responseType: "arraybuffer",
+  });
+  return Buffer.from(response.data);
 }
 
-app.get("/tiles/:zoom/:x/:y", async (req, res) => {
-  const { zoom, x, y } = req.params;
-  const parsedX = parseInt(x, 10);
-  const parsedY = parseInt(y, 10);
-
-  db.query(
-    "SELECT data FROM tiles WHERE zoom = ? AND x = ? AND y = ?",
-    [zoom, parsedX, parsedY],
-    async (error, results) => {
-      if (error) {
-        console.error("Error querying the database:", error);
-        res.status(500).send("Internal Server Error");
-        return;
-      }
-
-      if (results.length > 0 && results[0].data) {
-        res.send(results[0].data);
-      } else {
-        await downloadTilesForRequest(zoom, x, y);
-        db.query(
-          "SELECT data FROM tiles WHERE zoom = ? AND x = ? AND y = ?",
-          [zoom, parsedX, parsedY],
-          (err, downloadedTile) => {
-            if (err) {
-              console.error(
-                "Error retrieving downloaded tile from the database:",
-                err
-              );
-              res.status(500).send("Internal Server Error");
-              return;
-            }
-
-            if (downloadedTile.length > 0 && downloadedTile[0].data) {
-              res.send(downloadedTile[0].data);
-            } else {
-              res.status(404).send("Tile not found");
-            }
-          }
-        );
-      }
-    }
-  );
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok" });
 });
+
+function absoluteFrontendUrl(req, resourceUrl) {
+  if (!resourceUrl.startsWith("/")) {
+    return resourceUrl;
+  }
+
+  return `${req.protocol}://${req.get("host")}${resourceUrl}`;
+}
+
+app.get("/tile.json", async (req, res) => {
+  try {
+    const tileConfig = JSON.parse(
+      await fs.readFile(path.join(frontendDirectory, "tile.json"), "utf8")
+    );
+    tileConfig.tiles = tileConfig.tiles.map((url) =>
+      absoluteFrontendUrl(req, url)
+    );
+    res.json(tileConfig);
+  } catch (error) {
+    console.error("Error serving tile configuration:", error);
+    res.status(500).send("Unable to serve tile configuration");
+  }
+});
+
+app.get("/styleMap.json", async (req, res) => {
+  try {
+    const style = JSON.parse(
+      await fs.readFile(path.join(frontendDirectory, "styleMap.json"), "utf8")
+    );
+    style.sources.carto.url = absoluteFrontendUrl(
+      req,
+      style.sources.carto.url
+    );
+    style.glyphs = absoluteFrontendUrl(req, style.glyphs);
+    res.json(style);
+  } catch (error) {
+    console.error("Error serving map style:", error);
+    res.status(500).send("Unable to serve map style");
+  }
+});
+
+app.get("/tiles/:zoom/:x/:y", async (req, res) => {
+  const { zoom, x } = req.params;
+  const y = req.params.y.replace(/\.mvt$/, "");
+  const parsedZoom = Number(zoom);
+  const parsedX = Number(x);
+  const parsedY = Number(y);
+
+  if (
+    !/^\d+$/.test(zoom) ||
+    !/^\d+$/.test(x) ||
+    !/^\d+$/.test(y) ||
+    ![parsedZoom, parsedX, parsedY].every(Number.isSafeInteger)
+  ) {
+    res.status(400).send("Invalid tile coordinates");
+    return;
+  }
+
+  try {
+    const results = await query(
+      "SELECT data FROM tiles WHERE zoom = ? AND x = ? AND y = ?",
+      [parsedZoom, parsedX, parsedY]
+    );
+
+    if (results.length > 0 && results[0].data) {
+      res.type("application/vnd.mapbox-vector-tile").send(results[0].data);
+      return;
+    }
+
+    const tileData = await downloadTile(parsedZoom, parsedX, parsedY);
+    await query(
+      "INSERT INTO tiles(zoom, x, y, data) VALUES(?, ?, ?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)",
+      [parsedZoom, parsedX, parsedY, tileData]
+    );
+    res.type("application/vnd.mapbox-vector-tile").send(tileData);
+  } catch (error) {
+    console.error("Error serving map tile:", error);
+    res.status(500).send("Unable to retrieve map tile");
+  }
+});
+
 async function downloadFontData(fontStack, fontRange) {
   const fontUrl = `https://tiles.basemaps.cartocdn.com/fonts/${encodeURIComponent(
     fontStack
   )}/${fontRange}.pbf`;
-  try {
-    const response = await axios({
-      method: "GET",
-      url: fontUrl,
-      responseType: "arraybuffer",
-    });
-    const fontData = Buffer.from(response.data);
-    db.query(
-      "INSERT INTO fonts(name, font_range, data) VALUES(?, ?, ?)",
-      [fontStack, fontRange, fontData],
-      (error) => {
-        if (error) {
-          console.error("Error inserting font data:", error);
-        } else {
-          console.log(
-            `Downloaded and saved font (${fontStack}/${fontRange}) to the database`
-          );
-        }
-      }
-    );
-  } catch (error) {
-    console.error(`Error downloading ${fontUrl}: ${error}`);
-  }
+  const response = await axios({
+    method: "GET",
+    url: fontUrl,
+    responseType: "arraybuffer",
+  });
+  return Buffer.from(response.data);
 }
+
 app.get("/fonts/:fontStack/:fontRange", async (req, res) => {
   const { fontStack, fontRange } = req.params;
-  db.query(
-    "SELECT data FROM fonts WHERE name = ? AND font_range = ?",
-    [fontStack, fontRange],
-    async (error, results) => {
-      if (error) {
-        console.error("Error querying the database for font:", error);
-        res.status(500).send("Internal Server Error");
-        return;
-      }
-      if (results.length > 0 && results[0].data) {
-        res.send(results[0].data);
-      } else {
-        await downloadFontData(fontStack, fontRange);
-        db.query(
-          "SELECT data FROM fonts WHERE name = ? AND font_range = ?",
-          [fontStack, fontRange],
-          (err, downloadedFont) => {
-            if (err) {
-              console.error(
-                "Error retrieving downloaded font from the database:",
-                err
-              );
-              res.status(500).send("Internal Server Error");
-              return;
-            }
-            if (downloadedFont.length > 0 && downloadedFont[0].data) {
-              res.send(downloadedFont[0].data);
-            } else {
-              res.status(404).send("Font not found");
-            }
-          }
-        );
+
+  try {
+    const results = await query(
+      "SELECT data FROM fonts WHERE name = ? AND font_range = ?",
+      [fontStack, fontRange]
+    );
+
+    if (results.length > 0 && results[0].data) {
+      res.type("application/x-protobuf").send(results[0].data);
+      return;
+    }
+
+    const fontData = await downloadFontData(fontStack, fontRange);
+    await query(
+      "INSERT INTO fonts(name, font_range, data) VALUES(?, ?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)",
+      [fontStack, fontRange, fontData]
+    );
+    res.type("application/x-protobuf").send(fontData);
+  } catch (error) {
+    console.error("Error serving map font:", error);
+    res.status(500).send("Unable to retrieve map font");
+  }
+});
+
+app.use(express.static(frontendDirectory));
+
+app.get("*", (req, res) => {
+  if (!req.accepts("html")) {
+    res.sendStatus(404);
+    return;
+  }
+
+  res.sendFile(path.join(frontendDirectory, "index.html"), (error) => {
+    if (error) {
+      console.error("Error serving frontend:", error);
+      if (!res.headersSent) {
+        res.status(error.statusCode || 500).send("Unable to serve frontend");
       }
     }
-  );
+  });
 });
-const port = 3001;
-app.listen(port, () => {
+
+const port = Number(process.env.PORT) || 3001;
+app.listen(port, "0.0.0.0", () => {
   console.log(`Server is running on port ${port}`);
 });
