@@ -8,9 +8,15 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+node_modules copy/
+.git copy/
+backup.zip
+package-lock copy.json
 dist
 dist-ssr
+/frontend/dist/
 *.local
+.env
 
 # Editor directories and files
 .vscode/*
