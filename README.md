@@ -66,7 +66,7 @@ Copy-Item .env.example .env
 npm run dev
 ```
 
-The Vite development server prints the frontend URL (normally `http://localhost:5173`). Set `VITE_API_BASE_URL` in the frontend `.env` to the backend's reachable URL; the default is `http://localhost:3001`. The backend accepts cross-origin requests by default. To restrict CORS, set `CORS_ORIGIN` to the frontend origin before starting the backend.
+The Vite development server prints the frontend URL (normally `http://localhost:5173`). Set `VITE_API_BASE_URL` in the frontend `.env` to the backend's reachable URL; the default is `http://localhost:3001`. The backend accepts cross-origin requests by default. To restrict CORS, set `CORS_ORIGIN` to the allowed frontend origins, separated by commas, before starting the backend.
 
 ## Frontend Map Files
 
@@ -126,7 +126,7 @@ For example, the file should contain:
 ```dotenv
 MYSQL_ROOT_PASSWORD=your-strong-root-password
 DB_PASSWORD=your-strong-map-password
-CORS_ORIGIN=http://localhost:8080
+CORS_ORIGIN=https://map.metarang.com,http://map.metarang.com
 ```
 
 Docker Desktop must be running before you start the services.
